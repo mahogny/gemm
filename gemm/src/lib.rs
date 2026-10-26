@@ -9,8 +9,9 @@ pub use crate::gemm::{c32, c64, gemm};
 pub use gemm_common::Parallelism;
 
 pub use gemm_common::gemm::{
-    get_lhs_packing_threshold_multi_thread, get_lhs_packing_threshold_single_thread,
-    get_rhs_packing_threshold, get_threading_threshold, set_lhs_packing_threshold_multi_thread,
+    get_avx512_enabled, get_lhs_packing_threshold_multi_thread,
+    get_lhs_packing_threshold_single_thread, get_rhs_packing_threshold, get_threading_threshold,
+    set_avx512_enabled, set_lhs_packing_threshold_multi_thread,
     set_lhs_packing_threshold_single_thread, set_rhs_packing_threshold, set_threading_threshold,
     DEFAULT_LHS_PACKING_THRESHOLD_MULTI_THREAD, DEFAULT_LHS_PACKING_THRESHOLD_SINGLE_THREAD,
     DEFAULT_RHS_PACKING_THRESHOLD, DEFAULT_THREADING_THRESHOLD,

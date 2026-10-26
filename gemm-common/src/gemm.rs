@@ -6,7 +6,7 @@ use crate::{
     simd::MixedSimd,
     Parallelism, Ptr,
 };
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use dyn_stack::{DynStack, StackReq};
 #[cfg(feature = "f16")]
 use half::f16;
@@ -112,13 +112,20 @@ pub const DEFAULT_THREADING_THRESHOLD: usize = 48 * 48 * 256;
 #[cfg(target_arch = "aarch64")]
 pub const DEFAULT_RHS_PACKING_THRESHOLD: usize = 2;
 #[cfg(not(target_arch = "aarch64"))]
-pub const DEFAULT_RHS_PACKING_THRESHOLD: usize = 128;
+// Avoid repacking the right operand for the medium-width CPU projections
+// common in inference graphs.  The packed path remains available above this
+// crossover (and can still be selected explicitly through the public setter).
+pub const DEFAULT_RHS_PACKING_THRESHOLD: usize = 256;
 
 pub const DEFAULT_LHS_PACKING_THRESHOLD_SINGLE_THREAD: usize = 8;
 pub const DEFAULT_LHS_PACKING_THRESHOLD_MULTI_THREAD: usize = 16;
 
 static THREADING_THRESHOLD: AtomicUsize = AtomicUsize::new(DEFAULT_THREADING_THRESHOLD);
 static RHS_PACKING_THRESHOLD: AtomicUsize = AtomicUsize::new(DEFAULT_RHS_PACKING_THRESHOLD);
+// Runtime dispatch normally selects AVX-512 when compiled and supported.  Keep
+// an explicit control for attribution on CPUs where its frequency license can
+// outweigh the wider microkernel on an end-to-end inference workload.
+static AVX512_ENABLED: AtomicBool = AtomicBool::new(true);
 static LHS_PACKING_THRESHOLD_SINGLE_THREAD: AtomicUsize =
     AtomicUsize::new(DEFAULT_LHS_PACKING_THRESHOLD_SINGLE_THREAD);
 static LHS_PACKING_THRESHOLD_MULTI_THREAD: AtomicUsize =
@@ -139,7 +146,20 @@ pub fn get_rhs_packing_threshold() -> usize {
 }
 #[inline]
 pub fn set_rhs_packing_threshold(value: usize) {
-    RHS_PACKING_THRESHOLD.store(value.min(256), Ordering::Relaxed);
+    // This is an opt-in, process-global tuning control. Permit testing
+    // thresholds above the default so callers can actually measure the
+    // no-pack crossover on large inference projections.
+    RHS_PACKING_THRESHOLD.store(value.min(4096), Ordering::Relaxed);
+}
+
+#[inline]
+pub fn get_avx512_enabled() -> bool {
+    AVX512_ENABLED.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn set_avx512_enabled(value: bool) {
+    AVX512_ENABLED.store(value, Ordering::Relaxed);
 }
 
 #[inline]
@@ -1012,7 +1032,8 @@ macro_rules! gemm_def {
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             {
                 #[cfg(feature = "x86-v4")]
-                if $crate::feature_detected!("avx512f") {
+                if ::gemm_common::gemm::get_avx512_enabled() && $crate::feature_detected!("avx512f")
+                {
                     return avx512f::gemm_basic;
                 }
                 if $crate::feature_detected!("fma") {
